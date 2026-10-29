@@ -92,9 +92,15 @@
     });
   }
 
+  function markDrops() {
+    $("dropBase").classList.toggle("ready", !!files.base);
+    $("dropComp").classList.toggle("ready", !!files.comp);
+  }
+
   function setFile(which, f) {
     files[which] = f;
     (which === "base" ? nameBase : nameComp).textContent = f.name;
+    markDrops();
     updateCompareEnabled();
   }
 
@@ -113,6 +119,7 @@
     files.comp = a;
     nameBase.textContent = files.base ? files.base.name : "点击选择，或把文件拖到这里";
     nameComp.textContent = files.comp ? files.comp.name : "点击选择，或把文件拖到这里";
+    markDrops();
   });
 
   btnReselect.addEventListener("click", () => {
