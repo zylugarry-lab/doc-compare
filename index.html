@@ -8,7 +8,7 @@
   <meta name="color-scheme" content="light" />
   <title>文档对比</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f3d73'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' fill='white' font-family='serif'%3E文%3C/text%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="style.css?v=20261030mix" />
+  <link rel="stylesheet" href="style.css?v=20261030pdf" />
 </head>
 <body>
   <div id="oldBrowser" class="old-browser" hidden>
@@ -30,11 +30,14 @@
         <label class="chk"><input type="checkbox" id="swapDocs" /> 文档对调</label>
         <label class="chk"><input type="checkbox" id="showLinks" checked /> 显示关联线</label>
         <button type="button" id="btnRecompare" class="btn ghost" hidden>按正文重比</button>
-        <button type="button" id="btnSaveLeftTop" class="btn primary" hidden>保存基准为 Word</button>
-        <button type="button" id="btnSaveRightTop" class="btn primary" hidden>保存对照为 Word</button>
-        <button type="button" id="btnExportBoth" class="btn ghost" hidden>两侧另存为 Word</button>
+        <button type="button" id="btnSaveLeftTop" class="btn primary" hidden>基准 Word</button>
+        <button type="button" id="btnSaveLeftPdfTop" class="btn ghost" hidden>基准 PDF</button>
+        <button type="button" id="btnSaveRightTop" class="btn primary" hidden>对照 Word</button>
+        <button type="button" id="btnSaveRightPdfTop" class="btn ghost" hidden>对照 PDF</button>
+        <button type="button" id="btnExportBoth" class="btn ghost" hidden>两侧另存</button>
       </span>
       <button type="button" id="btnEditSaveTop" class="btn primary" hidden>保存为 Word</button>
+      <button type="button" id="btnEditSavePdfTop" class="btn ghost" hidden>保存为 PDF</button>
       <button type="button" id="btnReselect" class="btn ghost" hidden>返回</button>
     </div>
   </header>
@@ -42,7 +45,7 @@
   <section id="uploadPanel" class="upload-panel">
     <div class="hero">
       <p class="eyebrow" id="eyebrowText">一边对照，一边改字</p>
-      <p class="lead" id="leadText">左侧放基准，右侧放对照。打开后颜色标出差异，点正文就能改，改完保存为 Word。支持 .docx、.doc、RTF 和 PDF。若选文件窗口里看不到 Word，把右下角改成「所有文件」。</p>
+      <p class="lead" id="leadText">左侧放基准，右侧放对照。打开后颜色标出差异，点正文就能改，Word 和 PDF 都可以改、也都可以保存。支持 .docx、.doc、RTF 和 PDF。若选文件窗口里看不到 Word，把右下角改成「所有文件」。</p>
     </div>
     <div class="drop-row">
       <div class="drop" id="dropBase">
@@ -80,11 +83,12 @@
       <span class="tag comp">在线修改</span>
       <strong id="editFileName">—</strong>
       <em id="editMeta">0 段</em>
-      <span class="edit-hint-bar">回车分段 · 段首退格合并 · Ctrl+S 保存为 Word</span>
+      <span class="edit-hint-bar">回车分段 · 段首退格合并 · 可存 Word 或 PDF</span>
       <span class="pane-actions">
         <button type="button" class="btn small" id="btnEditInsert">插入段落</button>
         <button type="button" class="btn small" id="btnEditDelete">删除本段</button>
         <button type="button" class="btn small primary" id="btnEditSave">保存为 Word</button>
+        <button type="button" class="btn small" id="btnEditSavePdf">保存为 PDF</button>
       </span>
     </div>
     <div class="edit-sheet">
@@ -102,7 +106,8 @@
           <span class="pane-actions">
             <button type="button" class="btn small" id="btnInsertLeft">插入段</button>
             <button type="button" class="btn small" id="btnDeleteLeft">删段</button>
-            <button type="button" class="btn small primary" id="btnSaveLeft">保存为 Word</button>
+            <button type="button" class="btn small primary" id="btnSaveLeft" title="保存为 Word">Word</button>
+            <button type="button" class="btn small" id="btnSaveLeftPdf" title="保存为 PDF">PDF</button>
           </span>
         </header>
         <div class="pane-body" id="leftPane"></div>
@@ -115,7 +120,8 @@
           <span class="pane-actions">
             <button type="button" class="btn small" id="btnInsertRight">插入段</button>
             <button type="button" class="btn small" id="btnDeleteRight">删段</button>
-            <button type="button" class="btn small primary" id="btnSaveRight">保存为 Word</button>
+            <button type="button" class="btn small primary" id="btnSaveRight" title="保存为 Word">Word</button>
+            <button type="button" class="btn small" id="btnSaveRightPdf" title="保存为 PDF">PDF</button>
           </span>
         </header>
         <div class="pane-body" id="rightPane"></div>
@@ -145,18 +151,21 @@
     <p id="loadingText">正在处理，请稍候…</p>
   </div>
   <div id="saveBar" class="save-bar" hidden>
-    <span id="saveBarText">改完后可保存成 Word（.docx）</span>
+    <span id="saveBarText">改完后可保存为 Word 或 PDF</span>
     <button type="button" class="btn" id="btnSaveBarEdit">保存为 Word</button>
-    <button type="button" class="btn" id="btnSaveBarLeft" hidden>保存基准为 Word</button>
-    <button type="button" class="btn" id="btnSaveBarRight" hidden>保存对照为 Word</button>
+    <button type="button" class="btn" id="btnSaveBarEditPdf">保存为 PDF</button>
+    <button type="button" class="btn" id="btnSaveBarLeft" hidden>基准 Word</button>
+    <button type="button" class="btn" id="btnSaveBarLeftPdf" hidden>基准 PDF</button>
+    <button type="button" class="btn" id="btnSaveBarRight" hidden>对照 Word</button>
+    <button type="button" class="btn" id="btnSaveBarRightPdf" hidden>对照 PDF</button>
   </div>
   <div id="toast" class="toast" hidden></div>
 
   <noscript>请允许运行 JavaScript，并用 Microsoft Edge 或 Chrome 打开本页。</noscript>
-  <script src="compat.js?v=20261030mix"></script>
+  <script src="compat.js?v=20261030pdf"></script>
   <script src="vendor/jszip.min.js"></script>
   <script src="vendor/pdf.min.js"></script>
-  <script src="engine.js?v=20261030mix"></script>
-  <script src="app.js?v=20261030mix"></script>
+  <script src="engine.js?v=20261030pdf"></script>
+  <script src="app.js?v=20261030pdf"></script>
 </body>
 </html>

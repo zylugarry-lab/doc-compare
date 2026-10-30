@@ -1246,6 +1246,133 @@
     });
   }
 
+  function utf16beHex(str) {
+    var hex = "";
+    var s = String(str || "");
+    for (var i = 0; i < s.length; i++) {
+      hex += ("000" + s.charCodeAt(i).toString(16)).slice(-4).toUpperCase();
+    }
+    return hex;
+  }
+
+  function wrapPdfLine(text, maxW, fontSize) {
+    var raw = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    var out = [];
+    var parts = raw.split("\n");
+    for (var p = 0; p < parts.length; p++) {
+      var line = parts[p];
+      if (!line) {
+        out.push("");
+        continue;
+      }
+      var cur = "";
+      var w = 0;
+      for (var i = 0; i < line.length; i++) {
+        var ch = line.charAt(i);
+        var cw = (line.charCodeAt(i) < 128 ? 0.5 : 1) * fontSize;
+        if (cur && w + cw > maxW) {
+          out.push(cur);
+          cur = ch;
+          w = cw;
+        } else {
+          cur += ch;
+          w += cw;
+        }
+      }
+      if (cur) out.push(cur);
+    }
+    return out;
+  }
+
+  function buildPdf(paragraphs) {
+    var pageW = 595.28;
+    var pageH = 841.89;
+    var margin = 54;
+    var fontSize = 11;
+    var lineH = 18;
+    var maxW = pageW - margin * 2;
+    var pages = [[]];
+    var y = 72;
+
+    function pushLine(ln) {
+      if (y > pageH - 56) {
+        pages.push([]);
+        y = 72;
+      }
+      pages[pages.length - 1].push({ y: y, text: ln });
+      y += lineH;
+    }
+
+    var list = paragraphs || [];
+    for (var pi = 0; pi < list.length; pi++) {
+      var lines = wrapPdfLine(list[pi], maxW, fontSize);
+      if (!lines.length) {
+        y += lineH * 0.3;
+        continue;
+      }
+      for (var li = 0; li < lines.length; li++) pushLine(lines[li]);
+      y += 8;
+    }
+    if (!pages[0].length) pages[0].push({ y: 72, text: " " });
+
+    function pageStream(items) {
+      var s = "BT\n/F1 " + fontSize + " Tf\n";
+      var prevY = null;
+      for (var i = 0; i < items.length; i++) {
+        var yPdf = pageH - items[i].y - fontSize;
+        if (prevY == null) s += margin + " " + yPdf.toFixed(2) + " Td\n";
+        else s += "0 " + (yPdf - prevY).toFixed(2) + " Td\n";
+        prevY = yPdf;
+        if (items[i].text) s += "<" + utf16beHex(items[i].text) + "> Tj\n";
+      }
+      return s + "ET\n";
+    }
+
+    var n = pages.length;
+    var objects = {};
+    objects[1] = "<< /Type /Catalog /Pages 2 0 R /Lang (zh-CN) >>";
+    var kids = [];
+    var i;
+    for (i = 0; i < n; i++) kids.push(6 + i + " 0 R");
+    objects[2] = "<< /Type /Pages /Kids [" + kids.join(" ") + "] /Count " + n + " >>";
+    objects[3] =
+      "<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /UniGB-UCS2-H /DescendantFonts [4 0 R] >>";
+    objects[4] =
+      "<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 4 >> /FontDescriptor 5 0 R /DW 1000 >>";
+    objects[5] =
+      "<< /Type /FontDescriptor /FontName /STSong-Light /Flags 6 /FontBBox [-25 -254 1000 880] /ItalicAngle 0 /Ascent 880 /Descent -254 /CapHeight 880 /StemV 44 >>";
+    for (i = 0; i < n; i++) {
+      var pageId = 6 + i;
+      var streamId = 6 + n + i;
+      objects[pageId] =
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " +
+        pageW +
+        " " +
+        pageH +
+        "] /Resources << /Font << /F1 3 0 R >> >> /Contents " +
+        streamId +
+        " 0 R >>";
+      var stream = pageStream(pages[i]);
+      objects[streamId] = "<< /Length " + stream.length + " >>\nstream\n" + stream + "endstream";
+    }
+
+    var maxId = 5 + 2 * n;
+    var out = "%PDF-1.4\n";
+    var offsets = [0];
+    for (i = 1; i <= maxId; i++) {
+      offsets[i] = out.length;
+      out += i + " 0 obj\n" + objects[i] + "\nendobj\n";
+    }
+    var xrefPos = out.length;
+    var xref = "xref\n0 " + (maxId + 1) + "\n0000000000 65535 f \n";
+    for (i = 1; i <= maxId; i++) {
+      xref += ("0000000000" + offsets[i]).slice(-10) + " 00000 n \n";
+    }
+    out += xref;
+    out += "trailer\n<< /Size " + (maxId + 1) + " /Root 1 0 R >>\nstartxref\n" + xrefPos + "\n%%EOF\n";
+    return new Blob([out], { type: "application/pdf" });
+  }
+
   function parasUnchanged(oldP, newP) {
     const a = (oldP || []).map((x) => compact(x)).filter(Boolean);
     const b = (newP || []).map((x) => compact(x)).filter(Boolean);
@@ -1260,6 +1387,7 @@
     compareTexts,
     extractFile,
     buildDocx,
+    buildPdf,
     parasUnchanged,
   };
 })(window);
