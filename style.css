@@ -572,6 +572,12 @@ body.app-mode-edit .upload-panel { max-width: 720px; }
   font-family: inherit;
 }
 .card .btn-apply:hover { background: #dce8f6; }
+.card .btn-apply.alt {
+  background: #fff;
+  border-color: #ddd4c4;
+  color: #3d4654;
+}
+.card .btn-apply.alt:hover { background: #f6f3ec; }
 
 #compareTools { display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 

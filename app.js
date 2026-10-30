@@ -48,7 +48,6 @@
   let syncing = false;
   let files = { base: null, comp: null };
   let anchors = [{ l: 0, r: 0 }];
-  let uiMode = "compare";
   let editSession = { paras: [], ext: ".docx", name: "", blob: null };
   let activeEditPane = null;
   let activePara = null;
@@ -77,27 +76,6 @@
   function updateCompareEnabled() {
     btnCompare.disabled = !(files.base && files.comp);
     btnOpenEdit.disabled = !(files.base || files.comp);
-  }
-
-  function setMode(mode) {
-    uiMode = mode === "edit" ? "edit" : "compare";
-    document.body.classList.toggle("app-mode-edit", uiMode === "edit");
-    document.body.classList.toggle("app-mode-compare", uiMode !== "edit");
-    $("tabCompare").classList.toggle("on", uiMode === "compare");
-    $("tabEdit").classList.toggle("on", uiMode === "edit");
-    $("tabCompare").setAttribute("aria-selected", uiMode === "compare" ? "true" : "false");
-    $("tabEdit").setAttribute("aria-selected", uiMode === "edit" ? "true" : "false");
-    btnCompare.hidden = uiMode !== "compare";
-    btnDemo.hidden = uiMode !== "compare";
-    btnOpenEdit.hidden = uiMode !== "edit";
-    btnNewBlank.hidden = uiMode !== "edit";
-    $("leadText").textContent =
-      uiMode === "edit"
-        ? "打开一份 Word / PDF，在网页里直接改字，保存为 Word。回车分段，段首退格合并。文件只在这台电脑处理，不会上传。"
-        : "左侧放基准，右侧放对照。支持 .docx、.doc、RTF 和 PDF。对比后可直接改字，也可切到「在线修改」打开一份文件编辑。若选文件窗口里看不到 Word，把右下角改成「所有文件」。";
-    $("labelBase").textContent = uiMode === "edit" ? "要修改的文档" : "基准文档";
-    $("hintBase").textContent = uiMode === "edit" ? "打开后可在页面里改字并保存" : "差异将相对此文档计算";
-    updateCompareEnabled();
   }
 
   function bindDrop(el, which) {
@@ -205,13 +183,14 @@
     const list = visibleChanges();
     changeList.innerHTML = list
       .map((c, i) => {
-        const applyLabel =
-          c.kind === "insert" ? "写入基准" : c.kind === "delete" ? "从基准删去" : "采用到基准";
         return `<article class="card${c.id === selectedId ? " on" : ""}" data-id="${c.id}">
           <div><span class="idx">${i + 1}.</span><span class="kind ${c.kind}">${KIND_LABEL[c.kind]}</span></div>
           <div class="row"><span class="lab">原文</span>${preview(c.old_text, 80)}</div>
           <div class="row"><span class="lab">差异</span>${preview(c.new_text, 80)}</div>
-          <div class="card-actions"><button type="button" class="btn-apply" data-apply="${c.id}">${applyLabel}</button></div>
+          <div class="card-actions">
+            <button type="button" class="btn-apply" data-apply="${c.id}" data-side="left">改到左边</button>
+            <button type="button" class="btn-apply alt" data-apply="${c.id}" data-side="right">改到右边</button>
+          </div>
         </article>`;
       })
       .join("");
@@ -412,7 +391,7 @@
     if (applyBtn) {
       e.preventDefault();
       e.stopPropagation();
-      applyChangeToLeft(applyBtn.getAttribute("data-apply"));
+      applyChange(applyBtn.getAttribute("data-apply"), applyBtn.getAttribute("data-side") || "left");
       return;
     }
     const card = e.target.closest(".card");
@@ -637,46 +616,82 @@
     markDirty(pane);
   }
 
-  function applyChangeToLeft(cid) {
+  function removeParaEl(el, pane) {
+    if (!el) return;
+    if (pane.querySelectorAll(".para").length <= 1) el.textContent = "";
+    else el.parentNode.removeChild(el);
+  }
+
+  function insertFromOther(targetPane, sourceEl, sourceIndex, sourcePrefix) {
+    const text = sourceEl ? paraPlain(sourceEl) : "";
+    const p = makeParaEl(text);
+    let anchor = null;
+    if (sourceIndex != null && sourceIndex > 0) {
+      const prev = document.getElementById("para-" + sourcePrefix + "-" + (sourceIndex - 1));
+      if (prev && prev.getAttribute("data-pair")) {
+        const destPrefix = sourcePrefix === "R" ? "L" : "R";
+        anchor = document.getElementById("para-" + destPrefix + "-" + prev.getAttribute("data-pair"));
+      }
+    }
+    if (anchor) anchor.after(p);
+    else targetPane.appendChild(p);
+    return p;
+  }
+
+  async function recompareCurrent() {
+    if (!session.left || !session.right) return;
+    await runCompare(
+      {
+        paras: collectParas(leftPane),
+        ext: session.left.ext,
+        name: session.left.name,
+        blob: session.left.blob,
+      },
+      {
+        paras: collectParas(rightPane),
+        ext: session.right.ext,
+        name: session.right.name,
+        blob: session.right.blob,
+      },
+      session.demo
+    );
+  }
+
+  async function applyChange(cid, side) {
     if (!data) return;
     const ch = data.changes.filter(function (x) {
       return x.id === cid;
     })[0];
     if (!ch) return;
-    jumpTo(cid);
+    const toLeft = side !== "right";
+    const pane = toLeft ? leftPane : rightPane;
+    const elL = ch.left_para != null ? document.getElementById("para-L-" + ch.left_para) : null;
+    const elR = ch.right_para != null ? document.getElementById("para-R-" + ch.right_para) : null;
     if (ch.kind === "modify" || ch.kind === "move") {
-      const elL = document.getElementById("para-L-" + ch.left_para);
-      const elR =
-        ch.right_para != null ? document.getElementById("para-R-" + ch.right_para) : null;
-      if (!elL) return;
-      unwrapHighlights(elL);
-      elL.textContent = elR ? paraPlain(elR) : ch.new_text || "";
+      const dest = toLeft ? elL : elR;
+      const src = toLeft ? elR : elL;
+      if (!dest) return;
+      unwrapHighlights(dest);
+      dest.textContent = src
+        ? paraPlain(src)
+        : toLeft
+          ? ch.new_text || ""
+          : ch.old_text || "";
     } else if (ch.kind === "insert") {
-      const elR =
-        ch.right_para != null ? document.getElementById("para-R-" + ch.right_para) : null;
-      const text = elR ? paraPlain(elR) : ch.new_text || "";
-      const p = makeParaEl(text);
-      let anchor = null;
-      if (ch.right_para != null && ch.right_para > 0) {
-        const prevR = document.getElementById("para-R-" + (ch.right_para - 1));
-        if (prevR && prevR.getAttribute("data-pair")) {
-          anchor = document.getElementById("para-L-" + prevR.getAttribute("data-pair"));
-        }
-      }
-      if (anchor) anchor.after(p);
-      else leftPane.appendChild(p);
-      p.focus();
-      activePara = p;
-      activeEditPane = leftPane;
+      if (toLeft) insertFromOther(leftPane, elR, ch.right_para, "R");
+      else removeParaEl(elR, rightPane);
     } else if (ch.kind === "delete") {
-      const elL = document.getElementById("para-L-" + ch.left_para);
-      if (elL) {
-        if (leftPane.querySelectorAll(".para").length <= 1) elL.textContent = "";
-        else elL.parentNode.removeChild(elL);
-      }
+      if (toLeft) removeParaEl(elL, leftPane);
+      else insertFromOther(rightPane, elL, ch.left_para, "L");
     }
-    markDirty(leftPane);
-    showToast("已写入基准，可再点「按正文重比」");
+    markDirty(pane);
+    await recompareCurrent();
+    if (data && data.changes && data.changes.length) {
+      jumpTo(data.changes[0].id);
+      showToast("已改好这一条，继续下一条");
+    } else {
+      showToast("左右已经一致，可保存为 Word");
+    }
   }
 
   function bindEditor(pane) {
@@ -792,7 +807,7 @@
     const isEdit = kind === "edit";
     $("saveBarText").textContent = isEdit
       ? "改完后点保存，直接生成 Word（.docx）"
-      : "改完后可把当前正文保存成 Word";
+      : "左右都能改。改完保存为 Word，或点「按正文重比」更新差异";
     $("btnSaveBarEdit").hidden = !isEdit;
     $("btnSaveBarLeft").hidden = isEdit;
     $("btnSaveBarRight").hidden = isEdit;
@@ -951,8 +966,6 @@
     );
   });
 
-  $("tabCompare").addEventListener("click", () => setMode("compare"));
-  $("tabEdit").addEventListener("click", () => setMode("edit"));
   btnOpenEdit.addEventListener("click", async () => {
     const f = files.base || files.comp;
     if (!f) return;
@@ -983,22 +996,7 @@
   $("btnDeleteLeft").addEventListener("click", () => deleteParaIn(leftPane));
   $("btnInsertRight").addEventListener("click", () => insertParaIn(rightPane));
   $("btnDeleteRight").addEventListener("click", () => deleteParaIn(rightPane));
-  $("btnRecompare").addEventListener("click", async () => {
-    if (!session.left || !session.right) return;
-    const left = {
-      paras: collectParas(leftPane),
-      ext: session.left.ext,
-      name: session.left.name,
-      blob: session.left.blob,
-    };
-    const right = {
-      paras: collectParas(rightPane),
-      ext: session.right.ext,
-      name: session.right.name,
-      blob: session.right.blob,
-    };
-    await runCompare(left, right, session.demo);
-  });
+  $("btnRecompare").addEventListener("click", () => recompareCurrent());
   document.addEventListener("keydown", (e) => {
     if (!(e.ctrlKey || e.metaKey) || String(e.key).toLowerCase() !== "s") return;
     if (editPanel.hidden && resultPanel.hidden) return;
@@ -1008,7 +1006,7 @@
     else saveCompareSide("left");
   });
 
-  setMode("compare");
+  updateCompareEnabled();
 
   if (!window.DocDiff || !window.JSZip) {
     showToast("脚本未加载完整，请用 Microsoft Edge 或 Chrome 打开，并允许运行 JavaScript");
