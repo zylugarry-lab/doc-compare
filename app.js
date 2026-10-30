@@ -160,6 +160,9 @@
     $("btnExportBoth").hidden = true;
     $("btnRecompare").hidden = true;
     $("btnEditSaveTop").hidden = true;
+    $("btnSaveLeftTop").hidden = true;
+    $("btnSaveRightTop").hidden = true;
+    $("saveBar").hidden = true;
     swapDocs.checked = false;
     svg.innerHTML = "";
     leftPane.closest(".pane").classList.remove("is-dirty");
@@ -236,6 +239,9 @@
     $("btnExportBoth").hidden = false;
     $("btnRecompare").hidden = false;
     $("btnEditSaveTop").hidden = true;
+    $("btnSaveLeftTop").hidden = false;
+    $("btnSaveRightTop").hidden = false;
+    showSaveBar("compare");
     requestAnimationFrame(() => {
       rebuildAnchors();
       drawConnectors();
@@ -767,6 +773,9 @@
     $("btnEditSaveTop").hidden = false;
     $("btnExportBoth").hidden = true;
     $("btnRecompare").hidden = true;
+    $("btnSaveLeftTop").hidden = true;
+    $("btnSaveRightTop").hidden = true;
+    showSaveBar("edit");
     updateEditMeta();
     const first = editPane.querySelector(".para");
     if (first) {
@@ -777,23 +786,21 @@
     }
   }
 
-  async function saveEditor() {
-    const paragraphs = collectParas(editPane);
-    if (!paragraphs.length) {
-      showToast("没有可保存的文字");
-      return;
-    }
-    setLoading(true, "正在保存…");
-    try {
-      const blob = await DocDiff.buildDocx(paragraphs);
-      const stem = (editSession.name || "未命名").replace(/\.[^.]+$/, "") || "未命名";
-      downloadBlob(blob, stem + "-已修改.docx");
-      showToast("已保存为 Word");
-    } catch (err) {
-      showToast(err.message || String(err));
-    } finally {
-      setLoading(false);
-    }
+  function showSaveBar(kind) {
+    const bar = $("saveBar");
+    bar.hidden = false;
+    const isEdit = kind === "edit";
+    $("saveBarText").textContent = isEdit
+      ? "改完后点保存，直接生成 Word（.docx）"
+      : "改完后可把当前正文保存成 Word";
+    $("btnSaveBarEdit").hidden = !isEdit;
+    $("btnSaveBarLeft").hidden = isEdit;
+    $("btnSaveBarRight").hidden = isEdit;
+  }
+
+  function wordName(name, tag) {
+    const stem = String(name || "文档").replace(/\.[^.]+$/, "") || "文档";
+    return stem + "-" + (tag || "已修改") + ".docx";
   }
 
   function downloadBlob(blob, filename) {
@@ -806,7 +813,7 @@
     a.href = url;
     a.download = filename;
     a.rel = "noopener";
-    a.style.display = "none";
+    a.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;";
     document.body.appendChild(a);
     a.click();
     setTimeout(function () {
@@ -815,94 +822,95 @@
     }, 40000);
   }
 
-  async function exportOne(side, paragraphs, mode) {
-    const rec = side === "right" ? session.right : session.left;
-    const stem = (rec.name || "文档").replace(/\.[^.]+$/, "") || "文档";
-    const tag = mode === "save" ? "已修改" : "导出";
-    const orig = rec.paras || [];
-    if (rec.blob && DocDiff.parasUnchanged(orig, paragraphs)) {
-      const ext = rec.ext || ".docx";
-      downloadBlob(rec.blob, stem + "-" + tag + ext);
-      return ext;
+  async function pickDocxHandle(filename) {
+    if (!window.showSaveFilePicker) return null;
+    try {
+      return await window.showSaveFilePicker({
+        suggestedName: filename,
+        types: [
+          {
+            description: "Word 文档",
+            accept: {
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+            },
+          },
+        ],
+      });
+    } catch (err) {
+      if (err && err.name === "AbortError") return "abort";
+      return null;
     }
-    const blob = await DocDiff.buildDocx(paragraphs);
-    downloadBlob(blob, stem + "-" + tag + ".docx");
-    if ((rec.ext || "") === ".pdf") {
-      showToast("浏览器里改过的 PDF 已另存为 Word");
-    }
-    return ".docx";
   }
 
-  async function postExport(opts) {
-    if (!data) {
-      showToast("请先完成对比");
-      return;
+  async function saveAsDocx(paragraphs, filename) {
+    if (!paragraphs || !paragraphs.length) {
+      showToast("没有可保存的文字");
+      return false;
     }
-    setLoading(true, opts.mode === "save" ? "正在保存…" : "正在导出…");
+    const name = /\.docx$/i.test(filename) ? filename : filename + ".docx";
+    const handle = await pickDocxHandle(name);
+    if (handle === "abort") return false;
+    setLoading(true, "正在生成 Word…");
     try {
-      if (opts.side === "both") {
-        const zip = new JSZip();
-        const leftParas = opts.left_paragraphs || opts.paragraphs;
-        const rightParas = opts.right_paragraphs;
-        const lName = (session.left.name || "基准").replace(/\.[^.]+$/, "") + "-导出.docx";
-        const rName = (session.right.name || "对照").replace(/\.[^.]+$/, "") + "-导出.docx";
-        if (session.left.blob && DocDiff.parasUnchanged(session.left.paras, leftParas)) {
-          zip.file(
-            (session.left.name || "基准").replace(/\.[^.]+$/, "") + "-导出" + (session.left.ext || ".docx"),
-            session.left.blob
-          );
-        } else {
-          zip.file(lName, await DocDiff.buildDocx(leftParas));
-        }
-        if (session.right.blob && DocDiff.parasUnchanged(session.right.paras, rightParas)) {
-          zip.file(
-            (session.right.name || "对照").replace(/\.[^.]+$/, "") + "-导出" + (session.right.ext || ".docx"),
-            session.right.blob
-          );
-        } else {
-          zip.file(rName, await DocDiff.buildDocx(rightParas));
-        }
-        downloadBlob(
-          await zip.generateAsync({ type: "blob", mimeType: "application/zip" }),
-          "文档对比-导出.zip"
-        );
+      const blob = await DocDiff.buildDocx(paragraphs);
+      if (handle) {
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        showToast("已保存为 Word 文档");
       } else {
-        await exportOne(opts.side, opts.paragraphs, opts.mode);
+        downloadBlob(blob, name);
+        showToast("已下载 Word 文档（.docx）");
       }
-      showToast(opts.mode === "save" ? "已保存" : "已导出");
-      if (opts.side === "left" || opts.side === "both") {
-        leftPane.closest(".pane").classList.remove("is-dirty");
-      }
-      if (opts.side === "right" || opts.side === "both") {
-        rightPane.closest(".pane").classList.remove("is-dirty");
-      }
+      return true;
     } catch (err) {
       showToast(err.message || String(err));
+      return false;
     } finally {
       setLoading(false);
     }
   }
 
-  $("btnSaveLeft").addEventListener("click", () => {
-    postExport({ token, side: "left", mode: "save", paragraphs: collectParas(leftPane) });
-  });
-  $("btnSaveRight").addEventListener("click", () => {
-    postExport({ token, side: "right", mode: "save", paragraphs: collectParas(rightPane) });
-  });
-  $("btnExportLeft").addEventListener("click", () => {
-    postExport({ token, side: "left", mode: "export", paragraphs: collectParas(leftPane) });
-  });
-  $("btnExportRight").addEventListener("click", () => {
-    postExport({ token, side: "right", mode: "export", paragraphs: collectParas(rightPane) });
-  });
-  $("btnExportBoth").addEventListener("click", () => {
-    postExport({
-      token,
-      side: "both",
-      mode: "export",
-      left_paragraphs: collectParas(leftPane),
-      right_paragraphs: collectParas(rightPane),
-    });
+  async function saveEditor() {
+    const ok = await saveAsDocx(collectParas(editPane), wordName(editSession.name, "已修改"));
+    return ok;
+  }
+
+  async function saveCompareSide(side) {
+    const rec = side === "right" ? session.right : session.left;
+    const pane = side === "right" ? rightPane : leftPane;
+    const tag = side === "right" ? "对照" : "基准";
+    const ok = await saveAsDocx(collectParas(pane), wordName(rec && rec.name, tag + "-已修改"));
+    if (ok) pane.closest(".pane").classList.remove("is-dirty");
+    return ok;
+  }
+
+  $("btnSaveLeft").addEventListener("click", () => saveCompareSide("left"));
+  $("btnSaveRight").addEventListener("click", () => saveCompareSide("right"));
+  $("btnSaveLeftTop").addEventListener("click", () => saveCompareSide("left"));
+  $("btnSaveRightTop").addEventListener("click", () => saveCompareSide("right"));
+  $("btnExportBoth").addEventListener("click", async () => {
+    if (!data) {
+      showToast("请先完成对比");
+      return;
+    }
+    setLoading(true, "正在生成 Word…");
+    try {
+      const zip = new JSZip();
+      zip.file(wordName(session.left.name, "基准"), await DocDiff.buildDocx(collectParas(leftPane)));
+      zip.file(wordName(session.right.name, "对照"), await DocDiff.buildDocx(collectParas(rightPane)));
+      downloadBlob(
+        await zip.generateAsync({ type: "blob", mimeType: "application/zip" }),
+        "文档对比-Word.zip"
+      );
+      showToast("已下载两侧 Word（压缩包）");
+      leftPane.closest(".pane").classList.remove("is-dirty");
+      rightPane.closest(".pane").classList.remove("is-dirty");
+    } catch (err) {
+      showToast(err.message || String(err));
+    } finally {
+      setLoading(false);
+    }
   });
 
   async function runCompare(left, right, demo) {
@@ -968,6 +976,9 @@
   $("btnEditDelete").addEventListener("click", () => deleteParaIn(editPane));
   $("btnEditSave").addEventListener("click", () => saveEditor());
   $("btnEditSaveTop").addEventListener("click", () => saveEditor());
+  $("btnSaveBarEdit").addEventListener("click", () => saveEditor());
+  $("btnSaveBarLeft").addEventListener("click", () => saveCompareSide("left"));
+  $("btnSaveBarRight").addEventListener("click", () => saveCompareSide("right"));
   $("btnInsertLeft").addEventListener("click", () => insertParaIn(leftPane));
   $("btnDeleteLeft").addEventListener("click", () => deleteParaIn(leftPane));
   $("btnInsertRight").addEventListener("click", () => insertParaIn(rightPane));
@@ -993,11 +1004,8 @@
     if (editPanel.hidden && resultPanel.hidden) return;
     e.preventDefault();
     if (!editPanel.hidden) saveEditor();
-    else if (activeEditPane === rightPane) {
-      postExport({ token, side: "right", mode: "save", paragraphs: collectParas(rightPane) });
-    } else {
-      postExport({ token, side: "left", mode: "save", paragraphs: collectParas(leftPane) });
-    }
+    else if (activeEditPane === rightPane) saveCompareSide("right");
+    else saveCompareSide("left");
   });
 
   setMode("compare");
