@@ -8,9 +8,9 @@
   <meta name="color-scheme" content="light" />
   <title>文档对比</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f3d73'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' fill='white' font-family='serif'%3E文%3C/text%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="style.css?v=20261029ui" />
+  <link rel="stylesheet" href="style.css?v=20261030edit" />
 </head>
-<body>
+<body class="app-mode-compare">
   <div id="oldBrowser" class="old-browser" hidden>
     当前是 Internet Explorer 或 Edge 的 IE 模式，页面无法运行。请关掉 IE 模式：地址栏右侧 ⋯ → 重新加载（不使用 Internet Explorer 模式），或改用 Microsoft Edge / Chrome 打开。
   </div>
@@ -25,29 +25,37 @@
     </div>
     <div class="toolbar-actions">
       <span class="privacy-chip">本地处理</span>
-      <label class="chk"><input type="checkbox" id="syncScroll" checked /> 同步滚动</label>
-      <label class="chk"><input type="checkbox" id="swapDocs" /> 文档对调</label>
-      <label class="chk"><input type="checkbox" id="showLinks" checked /> 显示关联线</label>
-      <button type="button" id="btnExportBoth" class="btn ghost" hidden>导出两侧</button>
-      <button type="button" id="btnReselect" class="btn ghost" hidden>重新选择</button>
+      <span id="compareTools" class="compare-only">
+        <label class="chk"><input type="checkbox" id="syncScroll" checked /> 同步滚动</label>
+        <label class="chk"><input type="checkbox" id="swapDocs" /> 文档对调</label>
+        <label class="chk"><input type="checkbox" id="showLinks" checked /> 显示关联线</label>
+        <button type="button" id="btnRecompare" class="btn ghost" hidden>按正文重比</button>
+        <button type="button" id="btnExportBoth" class="btn ghost" hidden>导出两侧</button>
+      </span>
+      <button type="button" id="btnEditSaveTop" class="btn primary edit-only" hidden>保存为 Word</button>
+      <button type="button" id="btnReselect" class="btn ghost" hidden>返回</button>
     </div>
   </header>
 
   <section id="uploadPanel" class="upload-panel">
     <div class="hero">
-      <p class="eyebrow">Word · PDF · 老版 .doc</p>
-      <p class="lead">左侧放基准，右侧放对照。支持 .docx、.doc、RTF 和 PDF。点正文可改字。若选文件窗口里看不到 Word，把右下角改成「所有文件」。</p>
+      <div class="mode-tabs" role="tablist">
+        <button type="button" id="tabCompare" class="mode-tab on" role="tab" aria-selected="true">对比文件</button>
+        <button type="button" id="tabEdit" class="mode-tab" role="tab" aria-selected="false">在线修改</button>
+      </div>
+      <p class="eyebrow" id="eyebrowText">Word · PDF · 老版 .doc</p>
+      <p class="lead" id="leadText">左侧放基准，右侧放对照。支持 .docx、.doc、RTF 和 PDF。对比后可直接改字，也可切到「在线修改」打开一份文件编辑。若选文件窗口里看不到 Word，把右下角改成「所有文件」。</p>
     </div>
     <div class="drop-row">
       <div class="drop" id="dropBase">
         <input type="file" id="fileBase" class="drop-file" accept=".docx,.doc,.pdf,.rtf" />
         <span class="drop-art" aria-hidden="true"></span>
-        <em>基准文档</em>
+        <em id="labelBase">基准文档</em>
         <strong id="nameBase">点击选择，或把文件拖到这里</strong>
-        <span>差异将相对此文档计算</span>
+        <span id="hintBase">差异将相对此文档计算</span>
       </div>
-      <button type="button" id="btnSwapFiles" class="btn swap-mid" title="对调两个文件">⇄</button>
-      <div class="drop" id="dropComp">
+      <button type="button" id="btnSwapFiles" class="btn swap-mid compare-only" title="对调两个文件">⇄</button>
+      <div class="drop compare-only" id="dropComp">
         <input type="file" id="fileComp" class="drop-file" accept=".docx,.doc,.pdf,.rtf" />
         <span class="drop-art alt" aria-hidden="true"></span>
         <em>对照文档</em>
@@ -56,15 +64,34 @@
       </div>
     </div>
     <div class="upload-btns">
-      <button type="button" id="btnCompare" class="btn primary" disabled>开始对比</button>
-      <button type="button" id="btnDemo" class="btn ghost">查看示例演示</button>
+      <button type="button" id="btnCompare" class="btn primary compare-only" disabled>开始对比</button>
+      <button type="button" id="btnOpenEdit" class="btn primary edit-only" hidden disabled>打开并修改</button>
+      <button type="button" id="btnNewBlank" class="btn ghost edit-only" hidden>新建空白文档</button>
+      <button type="button" id="btnDemo" class="btn ghost compare-only">查看示例演示</button>
     </div>
-    <ul class="legend-preview">
+    <ul class="legend-preview compare-only">
       <li><i class="lg delete"></i>删除</li>
       <li><i class="lg insert"></i>新增</li>
       <li><i class="lg modify"></i>修改</li>
       <li><i class="lg move"></i>位置移动</li>
     </ul>
+  </section>
+
+  <section id="editPanel" class="edit-panel" hidden>
+    <div class="edit-toolbar">
+      <span class="tag comp">在线修改</span>
+      <strong id="editFileName">—</strong>
+      <em id="editMeta">0 段</em>
+      <span class="edit-hint-bar">回车分段 · 段首退格合并 · Ctrl+S 保存</span>
+      <span class="pane-actions">
+        <button type="button" class="btn small" id="btnEditInsert">插入段落</button>
+        <button type="button" class="btn small" id="btnEditDelete">删除本段</button>
+        <button type="button" class="btn small primary" id="btnEditSave">保存为 Word</button>
+      </span>
+    </div>
+    <div class="edit-sheet">
+      <div class="pane-body edit-paper" id="editPane"></div>
+    </div>
   </section>
 
   <section id="resultPanel" class="result-panel" hidden>
@@ -73,8 +100,10 @@
         <header class="pane-head">
           <span class="tag base">基准</span>
           <strong id="paneLeftName">—</strong>
-          <em class="edit-hint">点此改字</em>
+          <em class="edit-hint">点正文即可改</em>
           <span class="pane-actions">
+            <button type="button" class="btn small" id="btnInsertLeft">插入段</button>
+            <button type="button" class="btn small" id="btnDeleteLeft">删段</button>
             <button type="button" class="btn small" id="btnSaveLeft">保存</button>
             <button type="button" class="btn small" id="btnExportLeft">导出</button>
           </span>
@@ -85,8 +114,10 @@
         <header class="pane-head">
           <span class="tag comp">对照</span>
           <strong id="paneRightName">—</strong>
-          <em class="edit-hint">点此改字</em>
+          <em class="edit-hint">点正文即可改</em>
           <span class="pane-actions">
+            <button type="button" class="btn small" id="btnInsertRight">插入段</button>
+            <button type="button" class="btn small" id="btnDeleteRight">删段</button>
             <button type="button" class="btn small" id="btnSaveRight">保存</button>
             <button type="button" class="btn small" id="btnExportRight">导出</button>
           </span>
@@ -108,6 +139,7 @@
         <button type="button" data-kind="modify" class="k-modify">修改 <em id="cntModify">0</em></button>
         <button type="button" data-kind="move" class="k-move">移动 <em id="cntMove">0</em></button>
       </div>
+      <p class="apply-hint">点差异可跳转。可把对照写入基准，再按正文重比。</p>
       <div class="change-list" id="changeList"></div>
     </aside>
   </section>
@@ -119,10 +151,10 @@
   <div id="toast" class="toast" hidden></div>
 
   <noscript>请允许运行 JavaScript，并用 Microsoft Edge 或 Chrome 打开本页。</noscript>
-  <script src="compat.js?v=20261029ui"></script>
+  <script src="compat.js?v=20261030edit"></script>
   <script src="vendor/jszip.min.js"></script>
   <script src="vendor/pdf.min.js"></script>
-  <script src="engine.js?v=20261029ui"></script>
-  <script src="app.js?v=20261029ui"></script>
+  <script src="engine.js?v=20261030edit"></script>
+  <script src="app.js?v=20261030edit"></script>
 </body>
 </html>
