@@ -136,6 +136,7 @@
     uploadPanel.hidden = false;
     btnReselect.hidden = true;
     $("btnExportBoth").hidden = true;
+    $("btnManuscript").hidden = true;
     $("btnRecompare").hidden = true;
     $("btnEditSaveTop").hidden = true;
     $("btnEditSavePdfTop").hidden = true;
@@ -219,6 +220,7 @@
     resultPanel.hidden = false;
     btnReselect.hidden = false;
     $("btnExportBoth").hidden = false;
+    $("btnManuscript").hidden = false;
     $("btnRecompare").hidden = false;
     $("btnEditSaveTop").hidden = true;
     $("btnEditSavePdfTop").hidden = true;
@@ -794,6 +796,7 @@
     $("btnEditSaveTop").hidden = false;
     $("btnEditSavePdfTop").hidden = false;
     $("btnExportBoth").hidden = true;
+    $("btnManuscript").hidden = true;
     $("btnRecompare").hidden = true;
     $("btnSaveLeftTop").hidden = true;
     $("btnSaveLeftPdfTop").hidden = true;
@@ -823,6 +826,7 @@
     $("btnSaveBarLeftPdf").hidden = isEdit;
     $("btnSaveBarRight").hidden = isEdit;
     $("btnSaveBarRightPdf").hidden = isEdit;
+    $("btnSaveBarManuscript").hidden = isEdit;
   }
 
   function fileName(name, tag, fmt) {
@@ -930,6 +934,34 @@
   $("btnSaveLeftPdfTop").addEventListener("click", () => saveCompareSide("left", "pdf"));
   $("btnSaveRightTop").addEventListener("click", () => saveCompareSide("right", "docx"));
   $("btnSaveRightPdfTop").addEventListener("click", () => saveCompareSide("right", "pdf"));
+  async function downloadManuscript() {
+    if (!session.left || !session.right) {
+      showToast("请先完成对比");
+      return;
+    }
+    setLoading(true, "正在生成对比稿…");
+    try {
+      const payload = DocDiff.compareTexts(
+        collectParas(leftPane),
+        collectParas(rightPane),
+        session.left.name,
+        session.right.name
+      );
+      payload.token = "local";
+      data = payload;
+      renderResult(payload);
+      const blob = await DocDiff.buildDocx(DocDiff.manuscriptParagraphs(payload));
+      downloadBlob(blob, "对比稿.docx");
+      showToast("已下载对比稿。红色删除线是删去的，蓝色下划线是新增的");
+    } catch (err) {
+      showToast(err.message || String(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  $("btnManuscript").addEventListener("click", () => downloadManuscript());
+  $("btnSaveBarManuscript").addEventListener("click", () => downloadManuscript());
   $("btnExportBoth").addEventListener("click", async () => {
     if (!data) {
       showToast("请先完成对比");

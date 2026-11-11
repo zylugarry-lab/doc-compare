@@ -266,6 +266,7 @@
     return {
       index,
       html: segmentsToHtml(segments, side),
+      text: segments.map((s) => s.text || "").join(""),
       box: box || null,
       change_ids: cids,
       pair: pair == null ? null : pair,
@@ -1203,14 +1204,126 @@
       .replace(/>/g, "&gt;");
   }
 
-  async function buildDocx(paragraphs) {
-    const body = (paragraphs || [])
-      .filter((p) => String(p).trim())
-      .map(
-        (p) =>
-          `<w:p><w:r><w:t xml:space="preserve">${escXml(String(p))}</w:t></w:r></w:p>`
-      )
+  function redlineRuns(oldT, newT) {
+    oldT = String(oldT || "");
+    newT = String(newT || "");
+    if (normalize(oldT) === normalize(newT)) return [{ text: newT || oldT, mark: "same" }];
+    const ca = tokenize(oldT).filter((t) => t.isContent);
+    const cb = tokenize(newT).filter((t) => t.isContent);
+    if (!ca.length && !cb.length) return [{ text: newT || oldT, mark: "same" }];
+    if (!ca.length) return [{ text: newT, mark: "ins" }];
+    if (!cb.length) return [{ text: oldT, mark: "del" }];
+    const runs = [];
+    function push(text, mark) {
+      if (!text) return;
+      const last = runs[runs.length - 1];
+      if (last && last.mark === mark) last.text += text;
+      else runs.push({ text: text, mark: mark });
+    }
+    function take(orig, content, i1, i2) {
+      if (i1 >= i2 || !content.length) return "";
+      const start = i1 <= 0 ? 0 : content[i1 - 1].end;
+      const end = i2 >= content.length ? orig.length : content[i2 - 1].end;
+      return orig.slice(Math.max(0, start), end);
+    }
+    for (const [tag, i1, i2, j1, j2] of coalesceOpcodes(getOpcodes(ca.map((t) => t.norm), cb.map((t) => t.norm)))) {
+      if (tag === "equal") push(take(oldT, ca, i1, i2), "same");
+      else if (tag === "delete") push(take(oldT, ca, i1, i2), "del");
+      else if (tag === "insert") push(take(newT, cb, j1, j2), "ins");
+      else {
+        push(take(oldT, ca, i1, i2), "del");
+        push(take(newT, cb, j1, j2), "ins");
+      }
+    }
+    if (!runs.length) runs.push({ text: newT || oldT, mark: "same" });
+    return runs;
+  }
+
+  function manuscriptParagraphs(data) {
+    const out = [];
+    const counts = (data && data.counts) || {};
+    function pushPara(runs) {
+      const text = runs.map((r) => r.text || "").join("");
+      if (!String(text).trim()) return;
+      out.push(runs);
+    }
+    pushPara([{ text: "对比稿", mark: "title" }]);
+    pushPara([{
+      text: "基准：" + ((data && data.left_name) || "基准文档") + "　　对照：" + ((data && data.right_name) || "对照文档"),
+      mark: "note",
+    }]);
+    pushPara([{
+      text:
+        "相似度 " + ((data && data.similarity) || 0) + "%。删除 " + (counts.delete || 0) +
+        "，新增 " + (counts.insert || 0) + "，修改 " + (counts.modify || 0) +
+        "，移动 " + (counts.move || 0) + "。红色删除线是删去的文字，蓝色下划线是新增的文字。",
+      mark: "note",
+    }]);
+
+    const right = (data && data.right) || [];
+    let rCursor = 0;
+    function flushInserts(untilIndex) {
+      while (rCursor < right.length) {
+        const rv = right[rCursor];
+        if (untilIndex != null && rv.index >= untilIndex) break;
+        if (rv.kind === "insert") pushPara([{ text: rv.text || "", mark: "ins" }]);
+        rCursor += 1;
+      }
+    }
+    function advancePast(index) {
+      while (rCursor < right.length && right[rCursor].index <= index) rCursor += 1;
+    }
+    for (const lv of (data && data.left) || []) {
+      if (lv.pair != null) flushInserts(lv.pair);
+      const oldT = lv.text || "";
+      if (lv.kind === "delete") pushPara([{ text: oldT, mark: "del" }]);
+      else if (lv.kind === "equal") pushPara([{ text: oldT, mark: "same" }]);
+      else if ((lv.kind === "modify" || lv.kind === "move") && lv.pair != null) {
+        const rv = right.filter((x) => x.index === lv.pair)[0];
+        const newT = rv ? rv.text || "" : "";
+        const runs = [];
+        if (lv.kind === "move") runs.push({ text: "【位置有调整】", mark: "move" });
+        if (normalize(oldT) === normalize(newT)) runs.push({ text: newT || oldT, mark: "same" });
+        else runs.push.apply(runs, redlineRuns(oldT, newT));
+        pushPara(runs);
+        advancePast(lv.pair);
+      } else pushPara([{ text: oldT, mark: "same" }]);
+    }
+    while (rCursor < right.length) {
+      if (right[rCursor].kind === "insert") pushPara([{ text: right[rCursor].text || "", mark: "ins" }]);
+      rCursor += 1;
+    }
+    if (out.length <= 3) pushPara([{ text: "两份文档没有发现文字差异。", mark: "note" }]);
+    return out;
+  }
+
+  function runXml(run) {
+    const mark = run.mark || "same";
+    let rPr = "";
+    if (mark === "del") rPr = '<w:rPr><w:strike/><w:color w:val="C00000"/></w:rPr>';
+    else if (mark === "ins") rPr = '<w:rPr><w:u w:val="single"/><w:color w:val="1F6FB2"/></w:rPr>';
+    else if (mark === "note") rPr = '<w:rPr><w:color w:val="666666"/><w:sz w:val="21"/></w:rPr>';
+    else if (mark === "title") rPr = '<w:rPr><w:b/><w:sz w:val="32"/></w:rPr>';
+    else if (mark === "move") rPr = '<w:rPr><w:b/><w:color w:val="B86E00"/></w:rPr>';
+    return String(run.text || "")
+      .split("\n")
+      .map((part, i) => `<w:r>${rPr}${i ? "<w:br/>" : ""}<w:t xml:space="preserve">${escXml(part)}</w:t></w:r>`)
       .join("");
+  }
+
+  function paragraphXml(p) {
+    if (Array.isArray(p)) {
+      const runs = p.filter((r) => r && r.text);
+      if (!runs.length || !runs.map((r) => r.text).join("").trim()) return "";
+      return `<w:p>${runs.map(runXml).join("")}</w:p>`;
+    }
+    const text = String(p || "");
+    if (!text.trim()) return "";
+    return `<w:p><w:r><w:t xml:space="preserve">${escXml(text)}</w:t></w:r></w:p>`;
+  }
+
+  async function buildDocx(paragraphs) {
+    const body = (paragraphs || []).map(paragraphXml).filter(Boolean).join("");
     const docXml =
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
       '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
@@ -1388,6 +1501,7 @@
     extractFile,
     buildDocx,
     buildPdf,
+    manuscriptParagraphs,
     parasUnchanged,
   };
 })(window);
